@@ -1,6 +1,6 @@
 """Manage incident notification decisions."""
 
-from src.sentinel.state import IncidentStateStore
+from sentinel.state import IncidentStateStore
 
 
 class AlertManager:

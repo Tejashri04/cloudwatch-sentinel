@@ -1,0 +1,199 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Description: CloudWatch Sentinel - Intelligent AWS incident detection and alerting
+
+Parameters:
+  ApplicationLogGroup:
+    Type: String
+    Default: /cloudwatch-sentinel/application
+    Description: Existing CloudWatch application log group
+
+Resources:
+
+  IncidentTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: fingerprint
+          AttributeType: S
+      KeySchema:
+        - AttributeName: fingerprint
+          KeyType: HASH
+
+  ProcessedEventsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: event_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: event_id
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expires_at
+        Enabled: true
+
+  NotificationOutboxTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: notification_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: notification_id
+          KeyType: HASH
+
+
+  RecoveryEvaluator:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: cloudwatch-sentinel-recovery-evaluator
+      CodeUri: src/
+      Handler: sentinel.recovery_handler.lambda_handler
+      Runtime: python3.12
+      Timeout: 60
+      MemorySize: 256
+      Environment:
+        Variables:
+          APPLICATION_LOG_GROUP: !Ref ApplicationLogGroup
+          INCIDENT_TABLE: !Ref IncidentTable
+          PROCESSED_EVENTS_TABLE: !Ref ProcessedEventsTable
+          NOTIFICATION_OUTBOX_TABLE: !Ref NotificationOutboxTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref IncidentTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref NotificationOutboxTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:TransactWriteItems
+              Resource:
+                - !GetAtt IncidentTable.Arn
+                - !GetAtt NotificationOutboxTable.Arn
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:FilterLogEvents
+              Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${ApplicationLogGroup}:*
+      Events:
+        EvaluateRecovery:
+          Type: Schedule
+          Properties:
+            Schedule: rate(5 minutes)
+            Enabled: true
+
+
+  IncidentAlerts:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: cloudwatch-sentinel-alerts
+
+  IncidentProcessor:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: cloudwatch-sentinel-processor
+      CodeUri: src/
+      Handler: sentinel.lambda_handler.lambda_handler
+      Runtime: python3.12
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          INCIDENT_TABLE: !Ref IncidentTable
+          PROCESSED_EVENTS_TABLE: !Ref ProcessedEventsTable
+          NOTIFICATION_OUTBOX_TABLE: !Ref NotificationOutboxTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref IncidentTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ProcessedEventsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref NotificationOutboxTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:TransactWriteItems
+              Resource:
+                - !GetAtt IncidentTable.Arn
+                - !GetAtt ProcessedEventsTable.Arn
+                - !GetAtt NotificationOutboxTable.Arn
+  NotificationDispatcher:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: cloudwatch-sentinel-notification-dispatcher
+      CodeUri: src/
+      Handler: sentinel.notification_dispatcher.lambda_handler
+      Runtime: python3.12
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          NOTIFICATION_OUTBOX_TABLE: !Ref NotificationOutboxTable
+          SNS_TOPIC_ARN: !GetAtt IncidentAlerts.TopicArn
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref NotificationOutboxTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - sns:Publish
+              Resource: !Ref IncidentAlerts
+      Events:
+        DispatchNotifications:
+          Type: Schedule
+          Properties:
+            Schedule: rate(5 minutes)
+            Enabled: true
+
+
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt IncidentProcessor.Arn
+      Principal: logs.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${ApplicationLogGroup}:*
+
+  ApplicationLogSubscription:
+    Type: AWS::Logs::SubscriptionFilter
+    DependsOn: LambdaInvokePermission
+    Properties:
+      LogGroupName: !Ref ApplicationLogGroup
+      FilterPattern: ""
+      DestinationArn: !GetAtt IncidentProcessor.Arn
+
+Outputs:
+  IncidentTableName:
+    Description: DynamoDB incident state table
+    Value: !Ref IncidentTable
+
+  RecoveryEvaluatorArn:
+    Description: Recovery Evaluator Lambda ARN
+    Value: !GetAtt RecoveryEvaluator.Arn
+
+  ProcessedEventsTableName:
+    Description: DynamoDB processed event deduplication table
+    Value: !Ref ProcessedEventsTable
+
+  NotificationOutboxTableName:
+    Description: DynamoDB notification outbox table
+    Value: !Ref NotificationOutboxTable
+
+  IncidentTopicArn:
+    Description: SNS notification topic ARN
+    Value: !GetAtt IncidentAlerts.TopicArn
+
+  IncidentProcessorArn:
+    Description: Incident processor Lambda ARN
+    Value: !GetAtt IncidentProcessor.Arn

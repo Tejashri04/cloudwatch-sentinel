@@ -24,3 +24,9 @@ Thumbs.db
 # Local Sentinel incident state
 data/
 incidents.json
+# AWS SAM generated build files
+.aws-sam/
+
+# Temporary recovery test files
+recovery-response.json
+test-recovery-*.json

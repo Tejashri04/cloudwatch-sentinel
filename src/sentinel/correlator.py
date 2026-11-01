@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from typing import Any
 
-from src.sentinel.classifier import Classification, classify_event
+from sentinel.classifier import Classification, classify_event
 
 
 @dataclass

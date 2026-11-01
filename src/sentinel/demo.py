@@ -1,7 +1,7 @@
 """Run a local demonstration of CloudWatch Sentinel."""
 
-from src.sentinel.correlator import correlate_events
-from src.sentinel.state import IncidentStateStore
+from sentinel.correlator import correlate_events
+from sentinel.state import IncidentStateStore
 
 
 def main() -> None:
