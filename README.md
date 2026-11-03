@@ -2,112 +2,129 @@
 
 **Intelligent Incident Correlation and Alert Noise Reduction for AWS CloudWatch Logs**
 
-CloudWatch Sentinel is a Python-based monitoring project that analyzes structured application logs from Amazon CloudWatch Logs, identifies related failures across multiple services, groups them into incidents, and tracks incident recovery.
+CloudWatch Sentinel is a Python-based AWS monitoring prototype that analyzes structured application logs from Amazon CloudWatch Logs, identifies related failures across services, groups them into incidents, and tracks incident recovery.
 
-The project aims to reduce duplicate alerts and provide actionable root-cause hints to help developers investigate application failures.
+It helps reduce alert noise by correlating repeated failures, detecting duplicate events, maintaining incident state, and sending notifications for important incidents.
+
+The project demonstrates serverless AWS architecture, event-driven processing, persistent incident management, automated recovery evaluation, and CI/CD deployment.
 
 ## Key Features
 
-- **AWS CloudWatch Integration:** Fetch application logs from AWS CloudWatch Logs using Boto3.
-- **Structured Log Parsing:** Parse JSON-formatted log events for analysis.
-- **Error Classification:** Categorize errors such as timeouts, permission failures, throttling, connectivity issues, and application errors.
-- **Incident Correlation:** Group related errors across multiple services using incident fingerprints.
-- **Severity Classification:** Assign severity levels to detected errors.
-- **Root-Cause Hints:** Provide suggestions to help investigate potential causes of incidents.
-- **Incident State Tracking:** Identify new and ongoing incidents and detect recovery.
-- **Alert Noise Reduction:** Group repeated related failures to avoid treating every matching log event as a separate incident.
-- **Automated Testing:** Validate core functionality with pytest.
-- **Code Quality:** Use Ruff to check Python code.
+- **AWS CloudWatch Integration:** Collect structured log events from Amazon CloudWatch Logs using Boto3.
+- **Structured Log Parsing:** Parse JSON-formatted log events.
+- **Error Classification:** Identify timeouts, permission failures, throttling, connectivity issues, and application errors.
+- **Incident Correlation:** Group related failures using incident fingerprints.
+- **Severity Classification:** Assign severity levels to detected incidents.
+- **Root-Cause Hints:** Generate suggestions to assist incident investigation.
+- **Duplicate Event Detection:** Prevent repeated processing of the same log events.
+- **Persistent Incident Management:** Store incident information in Amazon DynamoDB.
+- **Alert Noise Reduction:** Group related failures rather than creating separate alerts for every matching event.
+- **SNS Notifications:** Send incident notifications through Amazon Simple Notification Service.
+- **Notification Reliability:** Use a DynamoDB notification outbox to track delivery attempts and retry pending notifications.
+- **Automated Recovery Evaluation:** Periodically evaluate incident recovery.
+- **Heartbeat Monitoring:** Use a Windows Scheduled Task to periodically upload heartbeat events.
+- **Automated Testing:** Validate application functionality using pytest.
+- **Code Quality:** Enforce Python code quality using Ruff.
+- **CI/CD:** Build and deploy the AWS SAM application using GitHub Actions and AWS OIDC authentication.
 
 ## Architecture
 
 ```text
-Application Services
-        |
-        v
-Structured Application Logs
-        |
-        v
+Sample Application Logs
+          |
+          v
 Amazon CloudWatch Logs
-        |
-        v
-CloudWatch Log Fetcher (Boto3)
-        |
-        v
-JSON Log Parser
-        |
-        v
-Error Classifier
-        |
-        v
-Incident Correlator
-        |
-        v
-Incident State Tracking
-        |
-        v
-Alert Status and Root-Cause Hints
-        |
-        v
-Console Output
+          |
+          v
+CloudWatch Logs Subscription Filter
+          |
+          v
+Incident Processor Lambda
+          |
+          +----------------------+
+          |                      |
+          v                      v
+DynamoDB Incident Table   DynamoDB Processed Events Table
+          |
+          v
+DynamoDB Notification Outbox
+          |
+          v
+Notification Dispatcher Lambda
+          |
+          v
+Amazon SNS
+          |
+          v
+Email Notifications
+
+
+EventBridge (Every 5 Minutes)
+          |
+          +-----------------------------+
+          |                             |
+          v                             v
+Recovery Evaluator Lambda     Notification Dispatcher Lambda
+          |
+          v
+Evaluate Incident Recovery
 ```
 
 ## Technology Stack
 
-- Python 3.12
-- Amazon CloudWatch Logs
-- AWS SDK for Python (Boto3)
-- pytest
-- Ruff
-- Git and GitHub
-
-## Project Structure
-
-```text
-cloudwatch-sentinel/
-├── data/
-│   └── incidents.json
-├── src/
-│   └── sentinel/
-│       ├── alert_manager.py
-│       ├── classifier.py
-│       ├── cloudwatch.py
-│       ├── correlator.py
-│       ├── demo.py
-│       └── state.py
-├── tests/
-│   ├── test_alert_manager.py
-│   ├── test_classifier.py
-│   ├── test_cloudwatch.py
-│   ├── test_correlator.py
-│   └── test_state.py
-├── run_cloudwatch.py
-├── send_sample_logs.py
-├── README.md
-└── .gitignore
-```
+| Category | Technologies |
+|---|---|
+| Programming Language | Python 3.12 |
+| AWS Monitoring | Amazon CloudWatch Logs |
+| Serverless | AWS Lambda |
+| Infrastructure as Code | AWS SAM, AWS CloudFormation |
+| Database | Amazon DynamoDB |
+| Notifications | Amazon SNS |
+| Scheduling | Amazon EventBridge |
+| AWS SDK | Boto3 |
+| Testing | pytest, moto |
+| Code Quality | Ruff |
+| CI/CD | GitHub Actions |
+| Authentication | AWS IAM, GitHub OIDC |
+| Version Control | Git and GitHub |
 
 ## How It Works
 
-1. Connects to Amazon CloudWatch Logs.
-2. Fetches structured application log events from the configured log group.
-3. Parses valid JSON events.
-4. Classifies errors by category and severity.
-5. Groups related failures using incident fingerprints.
-6. Identifies affected services and generates root-cause hints.
-7. Tracks incident states across executions.
-8. Reports new, ongoing, and recovered incidents.
+1. Structured sample log events are uploaded to Amazon CloudWatch Logs.
+2. A CloudWatch Logs subscription filter forwards log events to the Incident Processor Lambda.
+3. The Lambda decodes and processes the incoming log events.
+4. The classifier identifies error categories and severity.
+5. The correlator groups related failures using incident fingerprints.
+6. DynamoDB stores incident information and processed event identifiers.
+7. A notification outbox records notifications that need to be delivered.
+8. The Notification Dispatcher Lambda publishes pending notifications to SNS.
+9. EventBridge periodically triggers the Recovery Evaluator Lambda.
+10. The Recovery Evaluator checks whether previously open incidents have recovered and updates their state.
 
-Incident recovery is detected after an incident is absent for two consecutive analysis runs.
+## AWS Resources
 
-## Example Scenario
+The SAM template provisions the following resources:
+
+| AWS Resource | Purpose |
+|---|---|
+| CloudWatch Logs | Receives structured log events |
+| Incident Processor Lambda | Processes logs and identifies incidents |
+| Recovery Evaluator Lambda | Evaluates incident recovery |
+| Notification Dispatcher Lambda | Delivers pending notifications |
+| Incident DynamoDB Table | Stores incident state |
+| Processed Events DynamoDB Table | Tracks processed events and supports deduplication |
+| Notification Outbox DynamoDB Table | Tracks notification delivery and retries |
+| Amazon SNS Topic | Distributes incident notifications |
+| Amazon EventBridge | Schedules recovery evaluation and notification dispatch |
+
+## Incident Detection Example
 
 Suppose two services encounter timeout errors while accessing a dependency:
 
 - `OrderService`
 - `InventoryService`
 
-Instead of treating the two matching failures as unrelated incidents, CloudWatch Sentinel groups them under the same incident fingerprint.
+CloudWatch Sentinel groups these related failures under the same incident fingerprint.
 
 A separate permission failure from `PaymentService` is classified as another incident.
 
@@ -138,93 +155,268 @@ Root cause hint: Check IAM permissions, resource policies, and credentials.
 
 ========== ALERT STATUS ==========
 
-{'new': [], 'ongoing': ['PERMISSION:accessdeniedexception', 'TIMEOUT:timeouterror'], 'recovered': []}
+{'new': [], 'ongoing': ['PERMISSION:accessdeniedexception', 'TIMEOUT:timeouterror']}
 
 Incident analysis completed.
 ```
 
-*The output above is an example from a successful project run. Alert status depends on the previously stored incident state.*
+*The output is an example from a successful project run. Actual incident status depends on previously stored state.*
+
+## Incident Recovery
+
+CloudWatch Sentinel tracks incident state and detects recovery.
+
+The local state tracker uses the following statuses:
+
+- **NEW:** An incident is detected for the first time or reappears after recovery.
+- **ONGOING:** A previously open incident remains active.
+- **RECOVERED:** An incident has been absent for the configured recovery threshold.
+
+The default recovery threshold is two consecutive analysis runs without the incident.
+
+The AWS implementation uses DynamoDB to persist incident information and a scheduled Recovery Evaluator Lambda to evaluate recovery.
+
+## Heartbeat Monitoring
+
+The project includes a PowerShell script named `heartbeat_task.ps1`.
+
+It runs the following command:
+
+```powershell
+python send_sample_logs.py --heartbeat-only
+```
+
+The script uploads a heartbeat event to the configured CloudWatch log group and records execution output in:
+
+```text
+data/heartbeat-task.log
+```
+
+A Windows Scheduled Task named `CloudWatch Sentinel Heartbeat` can execute this script periodically.
+
+The heartbeat helps demonstrate scheduled monitoring and provides a recurring test event for the prototype.
+
+## Project Structure
+
+```text
+cloudwatch-sentinel/
+│
+├── .github/
+│   └── workflows/
+│       ├── ci.yml
+│       └── deploy.yml
+│
+├── src/
+│   └── sentinel/
+│       ├── __init__.py
+│       ├── alert_manager.py
+│       ├── classifier.py
+│       ├── cloudwatch.py
+│       ├── correlator.py
+│       ├── demo.py
+│       ├── dynamodb_store.py
+│       ├── lambda_handler.py
+│       ├── notification_dispatcher.py
+│       ├── recovery_handler.py
+│       └── state.py
+│
+├── tests/
+│   ├── test_alert_manager.py
+│   ├── test_classifier.py
+│   ├── test_cloudwatch.py
+│   ├── test_correlator.py
+│   ├── test_dynamodb_store.py
+│   ├── test_lambda_handler.py
+│   ├── test_notification_dispatcher.py
+│   ├── test_recovery_handler.py
+│   └── test_state.py
+│
+├── heartbeat_task.ps1
+├── pyproject.toml
+├── recovery-response.json
+├── run_cloudwatch.py
+├── samconfig.toml
+├── send_sample_logs.py
+├── template.yaml
+├── test-recovery-filter.json
+├── test-recovery-item.json
+├── test-recovery-key.json
+├── README.md
+└── .gitignore
+```
+
+Runtime data, virtual environments, and SAM build artifacts are excluded from version control.
 
 ## Prerequisites
 
 Before running the project, make sure you have:
 
-- Python 3.12 or a compatible Python version.
-- AWS CLI installed.
-- An AWS account with access to CloudWatch Logs.
-- AWS credentials configured securely for Boto3.
-- Access to the `/cloudwatch-sentinel/application` log group in the `ap-south-1` region.
+- Python 3.12
+- AWS CLI
+- AWS SAM CLI
+- An AWS account
+- AWS authentication configured securely
+- Git
+- Access to the configured CloudWatch log group
+- Appropriate IAM permissions for the required AWS resources
+
+The project uses the following defaults:
+
+```text
+AWS Region: ap-south-1
+CloudWatch Log Group: /cloudwatch-sentinel/application
+```
 
 ## Setup and Installation
 
-### 1. Clone the repository
+### 1. Clone the Repository
 
-```bash
+```powershell
 git clone https://github.com/Tejashri04/cloudwatch-sentinel.git
 cd cloudwatch-sentinel
 ```
 
-### 2. Create a virtual environment
-
-On Windows PowerShell:
+### 2. Create a Virtual Environment
 
 ```powershell
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 ```
 
-### 3. Install dependencies
+### 3. Install Dependencies
 
 ```powershell
-python -m pip install boto3 "botocore[crt]" pytest ruff
+python -m pip install boto3 pytest ruff moto
 ```
 
-### 4. Configure AWS authentication
+### 4. Configure AWS Authentication
 
-Configure AWS authentication using an approved AWS CLI authentication method. For example, if AWS CLI login is available for your environment:
+Authenticate using an approved AWS CLI authentication method.
+
+For example:
 
 ```powershell
 aws login --region ap-south-1
 ```
 
-Verify that AWS authentication works:
+Verify your AWS identity:
 
 ```powershell
 aws sts get-caller-identity
 ```
 
-Do not put AWS access keys or secret credentials in your source code or Git repository.
+Never store AWS access keys, secret keys, or other credentials in source code or GitHub.
 
-### 5. Configure the CloudWatch log group
+### 5. Configure the CloudWatch Log Group
 
-The application currently reads from:
+The application uses:
 
 ```text
 Region: ap-south-1
-Log group: /cloudwatch-sentinel/application
+Log Group: /cloudwatch-sentinel/application
 ```
 
-Ensure that the log group exists and that your AWS identity has permission to read its log events.
+Ensure the log group exists and the authenticated AWS identity has the necessary CloudWatch permissions.
 
-## Running the Project
+## Running the Project Locally
 
-### Analyze CloudWatch logs
+### Analyze CloudWatch Logs
 
 ```powershell
 python run_cloudwatch.py
 ```
 
-The application fetches logs, identifies incidents, and prints incident details and alert status.
+This fetches log events, classifies errors, correlates incidents, and reports incident status.
 
-### Send sample logs
-
-To populate the configured CloudWatch log stream with sample events, run:
+### Send Sample Logs
 
 ```powershell
 python send_sample_logs.py
 ```
 
-This operation writes events to AWS and may incur charges depending on your usage and AWS pricing. Run it only when you intend to upload the sample events.
+This uploads sample structured log events to CloudWatch.
+
+To upload only a heartbeat event:
+
+```powershell
+python send_sample_logs.py --heartbeat-only
+```
+
+These operations interact with AWS and may incur charges depending on usage and applicable AWS pricing.
+
+## AWS Deployment Using SAM
+
+The project uses AWS Serverless Application Model (SAM) to define and deploy its serverless infrastructure.
+
+### Validate the SAM Template
+
+```powershell
+sam validate --lint
+```
+
+### Build the Application
+
+```powershell
+sam build
+```
+
+### Deploy
+
+The configured GitHub Actions workflow performs the deployment.
+
+The workflow uses:
+
+- GitHub Actions
+- AWS OIDC authentication
+- AWS IAM deployment role
+- AWS SAM CLI
+- AWS CloudFormation
+
+Deployment is manually triggered through GitHub Actions using `workflow_dispatch`.
+
+Configure the following GitHub repository variables:
+
+| Variable | Purpose |
+|---|---|
+| `AWS_ROLE_ARN` | IAM role assumed through GitHub OIDC |
+| `AWS_REGION` | AWS deployment region |
+| `SAM_STACK_NAME` | CloudFormation stack name |
+
+The IAM role must have the permissions required to deploy the SAM application.
+
+## CI/CD Pipeline
+
+The GitHub Actions workflow automates the build and deployment process.
+
+```text
+GitHub Repository
+        |
+        v
+Manual Workflow Trigger
+        |
+        v
+GitHub Actions Runner
+        |
+        v
+AWS OIDC Authentication
+        |
+        v
+AWS IAM Deployment Role
+        |
+        v
+SAM Build
+        |
+        v
+SAM Deploy
+        |
+        v
+AWS CloudFormation Stack
+        |
+        v
+AWS Serverless Resources
+```
+
+The deployment workflow is manually triggered to provide control over AWS deployments.
 
 ## Running Tests
 
@@ -234,7 +426,17 @@ Run the complete test suite:
 python -m pytest -v
 ```
 
-The project currently has **25 passing tests** covering classification, incident correlation, CloudWatch integration, alert management, and incident state tracking.
+The project currently has **50 passing tests** covering:
+
+- Error classification
+- Incident correlation
+- CloudWatch integration
+- Alert management
+- Incident state tracking
+- Lambda event processing
+- DynamoDB persistence and deduplication
+- Notification dispatch and retries
+- Recovery evaluation
 
 ### Check Code Quality
 
@@ -242,50 +444,62 @@ The project currently has **25 passing tests** covering classification, incident
 python -m ruff check .
 ```
 
-The current code passes Ruff checks.
+The project passes Ruff checks.
 
-## Incident State Tracking
+### Validate and Build SAM
 
-CloudWatch Sentinel maintains incident state in:
-
-```text
-data/incidents.json
+```powershell
+sam validate --lint
+sam build
 ```
 
-The state tracker distinguishes between:
+The SAM template validates successfully and the application builds successfully.
 
-- **NEW:** An incident is detected for the first time or reappears after being resolved.
-- **ONGOING:** A previously open incident remains active.
-- **RECOVERED:** An open incident has been absent for the configured recovery threshold.
+## Security and Reliability
 
-The default recovery threshold is two consecutive analysis runs without the incident.
+The project incorporates several reliability and security practices:
 
-The JSON state file persists between executions, allowing the application to track incidents across runs.
-
-## Future Enhancements
-
-- Amazon SNS notifications for important incidents.
-- More advanced cross-service dependency correlation.
-- Configurable log lookback windows and incident thresholds.
-- Improved root-cause analysis.
-- Dashboards for incident history and service health.
-- GitHub Actions automation for testing and deployment.
+- AWS IAM roles and least-privilege permissions.
+- GitHub OIDC authentication instead of storing long-lived AWS credentials in GitHub.
+- DynamoDB-based persistent incident storage.
+- Processed event tracking to reduce duplicate processing.
+- Notification outbox to support reliable notification delivery.
+- Retry and attempt tracking for notification failures.
+- DynamoDB TTL for processed event records.
+- CloudWatch and Lambda logging for operational visibility.
 
 ## Learning Outcomes
 
 This project demonstrates practical experience with:
 
-- AWS CloudWatch Logs and Boto3 integration.
-- Python application design and modular programming.
-- Log parsing and error classification.
+- AWS CloudWatch Logs and Boto3.
+- AWS Lambda and event-driven architecture.
+- AWS SAM and infrastructure as code.
+- DynamoDB data persistence and transactions.
+- Amazon SNS notifications.
+- Amazon EventBridge scheduling.
+- Python application development.
 - Cross-service incident correlation.
-- Persistent state management and recovery detection.
-- Automated testing with pytest.
-- Code-quality checks with Ruff.
-- Git and GitHub project management.
+- Duplicate event detection and alert noise reduction.
+- Automated recovery evaluation.
+- pytest and moto testing.
+- Ruff code quality checks.
+- GitHub Actions CI/CD.
+- AWS IAM and GitHub OIDC authentication.
+
+## Future Enhancements
+
+- Advanced service dependency mapping.
+- Improved root-cause analysis.
+- Incident dashboards and visualization.
+- Configurable alert policies and notification channels.
+- More advanced incident analytics.
+- Additional observability integrations.
 
 ## Author
 
 **Tejashri**
 
 GitHub: https://github.com/Tejashri04
+
+Project Repository: https://github.com/Tejashri04/cloudwatch-sentinel
