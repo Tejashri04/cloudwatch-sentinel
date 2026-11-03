@@ -1,0 +1,47 @@
+
+name: Deploy CloudWatch Sentinel
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Build and Deploy to AWS
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up AWS SAM CLI
+        uses: aws-actions/setup-sam@v2
+
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Build SAM application
+        run: sam build
+
+      - name: Deploy SAM application
+        run: |
+          sam deploy \
+            --stack-name "${{ vars.SAM_STACK_NAME }}" \
+            --region "${{ vars.AWS_REGION }}" \
+            --resolve-s3 \
+            --s3-prefix cloudwatch-sentinel \
+            --capabilities CAPABILITY_IAM \
+            --parameter-overrides ApplicationLogGroup="/cloudwatch-sentinel/application" \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset
